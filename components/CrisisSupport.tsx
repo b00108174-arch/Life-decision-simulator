@@ -28,9 +28,9 @@ export default function CrisisSupport({ onBack }: CrisisSupportProps) {
       <div className="flex items-start gap-3 mb-4">
         <span className="text-2xl">💙</span>
         <div>
-          <h2 className="text-lg font-bold text-gray-800">You're not alone in this</h2>
+          <h2 className="text-lg font-bold text-gray-800">You&apos;re not alone in this</h2>
           <p className="text-sm text-gray-600 mt-1">
-            What you've shared matters, and it deserves more support than a decision
+            What you&apos;ve shared matters, and it deserves more support than a decision
             simulator can offer. Please reach out to someone who can help right now —
             a trusted adult, a counselor, or one of the services below.
           </p>
@@ -57,8 +57,8 @@ export default function CrisisSupport({ onBack }: CrisisSupportProps) {
       <p className="text-sm text-gray-600 mb-4">
         If you or someone else is in immediate danger, please contact local emergency
         services right away. If it feels safe to do so, telling a trusted adult,
-        friend, or family member what's going on can also make a real difference —
-        you don't have to carry this alone.
+        friend, or family member what&apos;s going on can also make a real difference —
+        you don&apos;t have to carry this alone.
       </p>
 
       <button

@@ -62,12 +62,17 @@ create table if not exists public.crisis_events (
   user_identifier text,           -- email, session id, or 'anonymous' — whatever is available, never inferred
   prompt_excerpt text not null,   -- the flagged input, stored for review; treat as sensitive
   detection_method text not null, -- 'keyword' | 'ai_classifier' | 'both'
+  source text not null default 'scenario', -- scenario | profile_followup | deep_dive_chat | server_analyze
   reviewed boolean not null default false, -- admin can mark as reviewed
   created_at timestamptz not null default now()
 );
 
+alter table public.crisis_events
+  add column if not exists source text not null default 'scenario';
+
 create index if not exists idx_crisis_events_created_at on public.crisis_events(created_at desc);
 create index if not exists idx_crisis_events_reviewed on public.crisis_events(reviewed);
+create index if not exists idx_crisis_events_source on public.crisis_events(source);
 
 -- ============================================================
 -- ROW LEVEL SECURITY

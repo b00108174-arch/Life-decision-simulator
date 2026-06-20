@@ -1,16 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { evaluateAndAlert } from '@/lib/serverSafety';
+import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase';
+
+interface AnalyzeRequestBody {
+  scenario: string;
+  originalScenario?: string;
+  followUpAnswers?: { question: string; answer: string }[];
+  personalizationContext?: string;
+  profileId?: string | null;
+  userIdentifier?: string;
+  source?: 'scenario' | 'deep_dive_chat' | 'server_analyze';
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const { scenario } = await req.json();
+    const body: AnalyzeRequestBody = await req.json();
+    const {
+      scenario,
+      originalScenario,
+      followUpAnswers = [],
+      personalizationContext = '',
+      profileId,
+      userIdentifier,
+      source = 'server_analyze',
+    } = body;
 
     if (!scenario || scenario.trim().length === 0) {
       return NextResponse.json({ error: 'Scenario is required' }, { status: 400 });
     }
 
+    const textToCheck = originalScenario ?? scenario;
+    const safety = await evaluateAndAlert({
+      text: textToCheck,
+      userIdentifier,
+      profileId: profileId ?? undefined,
+      source,
+    });
+
+    if (safety.flagged) {
+      return NextResponse.json(
+        { error: 'crisis_detected', flagged: true },
+        { status: 409 }
+      );
+    }
+
+    const followUpContext = followUpAnswers.length
+      ? `\n\nAdditional context from follow-up questions:\n${followUpAnswers
+          .map((item) => `- ${item.question}: ${item.answer}`)
+          .join('\n')}`
+      : '';
+
+    const historyContext = personalizationContext
+      ? `\n\nRelevant user history for personalization:\n${personalizationContext}`
+      : '';
+
     const prompt = `You are a thoughtful life advisor. A user is facing this decision or scenario:
 
-"${scenario}"
+"${scenario}"${followUpContext}${historyContext}
 
 Respond ONLY with a valid JSON object in exactly this structure (no markdown, no code blocks, just raw JSON):
 
@@ -89,6 +135,23 @@ Respond ONLY with a valid JSON object in exactly this structure (no markdown, no
         const text = data.choices?.[0]?.message?.content ?? '';
         const cleaned = text.replace(/```json|```/g, '').trim();
         const parsed = JSON.parse(cleaned);
+
+        if (profileId && originalScenario && isSupabaseConfigured()) {
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            const { error: dbError } = await supabase.from('decisions').insert({
+              profile_id: profileId,
+              scenario: originalScenario,
+              follow_up_answers: followUpAnswers,
+              analysis: parsed,
+            });
+
+            if (dbError) {
+              console.error('Failed to persist decision:', dbError);
+            }
+          }
+        }
+
         return NextResponse.json(parsed);
 
       } catch (e: unknown) {

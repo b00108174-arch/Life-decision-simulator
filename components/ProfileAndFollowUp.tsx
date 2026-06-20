@@ -11,7 +11,6 @@
 
 'use client';
 import { useState } from 'react';
-import { checkForCrisisKeywords } from '@/lib/crisisDetection';
 
 export interface CollectedProfile {
   name: string;
@@ -26,13 +25,17 @@ export interface FollowUpAnswer {
 
 interface ProfileAndFollowUpProps {
   scenario: string;
-  onComplete: (profile: CollectedProfile, answers: FollowUpAnswer[]) => void;
-  onCrisisDetected: (text: string) => void;
+  onComplete: (profile: CollectedProfile, answers: FollowUpAnswer[], profileId?: string | null) => void;
+  onCrisisCheck: (
+    text: string,
+    source: 'profile_followup',
+    context?: { userIdentifier?: string; profileId?: string | null }
+  ) => Promise<boolean>;
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function ProfileAndFollowUp({ scenario, onComplete, onCrisisDetected }: ProfileAndFollowUpProps) {
+export default function ProfileAndFollowUp({ scenario, onComplete, onCrisisCheck }: ProfileAndFollowUpProps) {
   const [stage, setStage] = useState<'profile' | 'followup'>('profile');
 
   // Profile fields
@@ -43,6 +46,7 @@ export default function ProfileAndFollowUp({ scenario, onComplete, onCrisisDetec
 
   // Follow-up flow
   const [profile, setProfile] = useState<CollectedProfile | null>(null);
+  const [savedProfileId, setSavedProfileId] = useState<string | null>(null);
   const [questions, setQuestions] = useState<string[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [currentAnswer, setCurrentAnswer] = useState('');
@@ -86,6 +90,7 @@ export default function ProfileAndFollowUp({ scenario, onComplete, onCrisisDetec
       const qs: string[] = Array.isArray(data.questions) && data.questions.length > 0
         ? data.questions.slice(0, 4)
         : ['What matters most to you in making this decision?'];
+      setSavedProfileId(data.profileId ?? null);
       setQuestions(qs);
       setStage('followup');
     } catch {
@@ -97,15 +102,16 @@ export default function ProfileAndFollowUp({ scenario, onComplete, onCrisisDetec
     }
   };
 
-  const submitAnswer = () => {
+  const submitAnswer = async () => {
     if (!currentAnswer.trim()) return;
 
-    // Run the keyword crisis check on every follow-up answer too —
+    // Run the full crisis check on every follow-up answer too —
     // not just the original scenario. Crisis signals can surface
     // anywhere in the conversation.
-    const keywordCheck = checkForCrisisKeywords(currentAnswer);
-    if (keywordCheck.flagged) {
-      onCrisisDetected(currentAnswer);
+    if (await onCrisisCheck(currentAnswer, 'profile_followup', {
+      userIdentifier: profile?.email,
+      profileId: savedProfileId,
+    })) {
       return;
     }
 
@@ -116,7 +122,7 @@ export default function ProfileAndFollowUp({ scenario, onComplete, onCrisisDetec
     if (currentQuestionIndex + 1 < questions.length) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
     } else if (profile) {
-      onComplete(profile, newAnswers);
+      onComplete(profile, newAnswers, savedProfileId);
     }
   };
 
@@ -156,7 +162,7 @@ export default function ProfileAndFollowUp({ scenario, onComplete, onCrisisDetec
               className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
             />
             {profileErrors.email && <p className="text-xs text-red-500 mt-1">{profileErrors.email}</p>}
-            <p className="text-xs text-gray-400 mt-1">We'll send your decision plan and flowchart here.</p>
+            <p className="text-xs text-gray-400 mt-1">We&apos;ll send your decision plan and flowchart here.</p>
           </div>
         </div>
 

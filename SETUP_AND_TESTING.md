@@ -3,11 +3,11 @@
 ## 1. Install new dependencies
 
 ```bash
-cd /Users/ashmitamalik66gmail.com/Desktop/Life-decision-simulator-main-2
-npm install @supabase/supabase-js
+cd /Users/ashmitamalik66gmail.com/Downloads/Life-decision-simulator-main
+npm install
 ```
 
-No new dependency is needed for email (we call Resend's HTTP API directly with `fetch`, no SDK required) or for the flowchart (it's plain SVG via React, no charting library).
+No new dependency is needed for email or admin alerts. The app calls Resend's HTTP API directly with `fetch`, and the alert inbox uses existing Next route handlers.
 
 ## 2. Copy in the new/changed files
 
@@ -24,6 +24,8 @@ No new dependency is needed for email (we call Resend's HTTP API directly with `
 | `app/api/profile/route.ts` | new |
 | `app/api/send-email/route.ts` | new |
 | `app/api/history/route.ts` | new |
+| `app/api/admin/alerts/route.ts` | new |
+| `app/admin/alerts/page.tsx` | new |
 | `app/history/page.tsx` | new |
 | `app/page.tsx` | **replace** — full file provided, preserves all existing features (toggles, timeline, chat) and adds the new flow on top |
 | `app/api/analyze/route.ts` | **edit by hand** — see `app/api/analyze/PATCH_NOTES.md` for the exact additions, since I didn't have your current file content to safely overwrite |
@@ -42,6 +44,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 RESEND_API_KEY=
 RESEND_FROM_ADDRESS=
+ADMIN_ALERT_EMAIL=
+ADMIN_DASHBOARD_TOKEN=
 ```
 
 Confirm `.env.local` is listed in `.gitignore` before committing anything — it should be there by default in a Next.js project, but double check since this repo is shared with Pranav.
@@ -51,6 +55,8 @@ Confirm `.env.local` is listed in `.gitignore` before committing anything — it
 1. Create a project at supabase.com (see earlier instructions in this conversation).
 2. Open **SQL Editor** → paste the contents of `sql/schema.sql` → Run.
 3. Confirm three tables appear under **Table Editor**: `profiles`, `decisions`, `crisis_events`.
+   - If you already created the tables before this update, rerun `sql/schema.sql` or run:
+     `alter table public.crisis_events add column if not exists source text not null default 'scenario';`
 4. Copy your **rotated** Project URL, anon key, and service_role key into `.env.local` directly (not into chat).
 5. Restart `npm run dev` so Next.js picks up the new env vars.
 
@@ -60,6 +66,8 @@ Confirm `.env.local` is listed in `.gitignore` before committing anything — it
 2. Get an API key from the dashboard.
 3. Add `RESEND_API_KEY` to `.env.local`.
 4. For testing, you can leave `RESEND_FROM_ADDRESS` unset — it defaults to Resend's sandbox sender (`onboarding@resend.dev`), which works without domain verification but may land in spam. For a real deployment, verify your own domain in Resend and set `RESEND_FROM_ADDRESS`.
+5. To email the admin when self-harm content is detected, add `ADMIN_ALERT_EMAIL`. Without it, alerts still persist in Supabase and show in `/admin/alerts`.
+6. To protect the admin inbox, set `ADMIN_DASHBOARD_TOKEN` and enter that token on `/admin/alerts`.
 
 ## 6. Testing checklist
 
@@ -68,6 +76,7 @@ Confirm `.env.local` is listed in `.gitignore` before committing anything — it
 - Enter a completely ordinary scenario ("Should I switch majors?") → should proceed normally to profile collection.
 - Check your server console (`npm run dev` terminal) — if Supabase isn't configured yet, you should see a `[CRISIS EVENT — not persisted...]` warning logged for any flagged input. Once Supabase is configured, check the `crisis_events` table in the Supabase dashboard instead.
 - Test a follow-up answer and a chat message containing crisis language too — both should trigger the same safety flow, not just the initial scenario field.
+- Visit `/admin/alerts` after a flagged test. You should see the alert, source, user identifier, excerpt, detection method, and a reviewed/unreviewed action.
 
 **Profile + follow-up:**
 - Try submitting the profile form with an invalid email or missing fields → should show inline validation errors, not submit.
