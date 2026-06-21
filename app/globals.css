@@ -11,13 +11,12 @@
   --foreground: #1E2235;
 
   /* Golden ratio type scale updated to be 1.5x larger */
-  --text-2xs: 0.9375rem;  /* 15px */
-  --text-xs:  1.0625rem;  /* 17px */
-  --text-sm:  1.5rem;      /* 24px */
-  --text-md:  1.625rem;   /* 26px */
-  --text-lg:  2.4375rem;  /* 39px */
-  --text-xl:  3.9375rem;  /* 63px */
-  --text-2xl: 6.375rem;   /* 102px */
+  --text-2xs: 13px;   /* Clean uppercase tags & labels */
+  --text-xs:  15px;   /* Crisp, compact card bodies & button text */
+  --text-sm:  18px;   /* Highly readable main content paragraphs */
+  --text-md:  24px;   /* Subtle section headings */
+  --text-lg:  36px;   /* Main sub-headers */
+  --text-xl:  54px;   /* Clear, balanced hero typography */
 
   /* Blue palette — subtle trust layer */
   --blue-50:  #EEF5FC;
@@ -117,12 +116,11 @@ textarea:focus {
 }
 
 /* Type scale utilities */
-.text-2xs   { font-size: var(--text-2xs); }
-.text-label { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
-.text-body  { font-size: var(--text-sm);  line-height: 1.7; }
-.text-sub   { font-size: var(--text-lg);  font-family: 'Montserrat', sans-serif; font-weight: 600; }
-.text-head  { font-size: var(--text-xl);  font-family: 'Montserrat', sans-serif; font-weight: 700; }
-
+.text-2xs   { font-size: var(--text-2xs) !important; }
+.text-label { font-size: var(--text-xs) !important; font-weight: 600; tracking: 0.04em; }
+.text-body  { font-size: var(--text-sm) !important; line-height: 1.6; }
+.text-sub   { font-size: var(--text-lg) !important; font-family: 'Montserrat', sans-serif; }
+.text-head  { font-size: var(--text-xl) !important; font-family: 'Montserrat', sans-serif; }
 .border-blue   { border-color: var(--blue-200); }
 .bg-blue-soft  { background-color: var(--blue-50); }
 .text-blue     { color: var(--blue-500); }
