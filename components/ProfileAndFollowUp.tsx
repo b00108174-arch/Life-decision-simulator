@@ -1,4 +1,4 @@
-// components/ProfileAndFollowUp.tsx
+  // components/ProfileAndFollowUp.tsx
 //
 // Two-stage intake flow shown before any decision analysis runs:
 //   Stage 1: collect name / age / email (required, validated)

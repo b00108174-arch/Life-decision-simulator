@@ -4,6 +4,18 @@ import { useState } from 'react';
 import DecisionFlowchart from '@/components/DecisionFlowchart';
 import { CollectedProfile } from '@/components/ProfileAndFollowUp';
 
+export interface TimelineStep {
+  label: string;
+  text: string;
+}
+
+export interface FlowchartStep {
+  phase?: string;
+  title: string;
+  desc: string;
+  timeframe?: string; // Added timeframe to the interface
+}
+
 export interface WarmPath {
   title: string;
   choice: string;
@@ -15,12 +27,16 @@ export interface WarmPath {
   blindspot?: string;
   threeYear?: string;
   fiveYear?: string;
+  tenYear?: string;
+  timelineSteps?: TimelineStep[];
+  flowchartSteps?: FlowchartStep[];
 }
 
 export interface WarmAnalysis {
   summary: string;
   pros: string[];
   cons: string[];
+  dynamicWhatIfs?: { id: string; label: string; description: string }[];
   paths: WarmPath[];
   recommendation: string;
 }
@@ -28,7 +44,7 @@ export interface WarmAnalysis {
 interface ToggleOption {
   id: string;
   label: string;
-  icon: string;
+  icon?: string;
   description: string;
 }
 
@@ -50,7 +66,10 @@ interface WarmDecisionResultsProps {
   onSendPlanByEmail: () => void;
 }
 
-const TIMELINE_YEARS = ['1 year', '3 years', '5 years', '10 years'] as const;
+// Helper function to extract a clean title if a model fallback slips a legacy prefix through
+function getCleanTitle(title: string) {
+  return title.includes(':') ? title.split(':').slice(1).join(':').trim() : title;
+}
 
 function pathLetter(index: number) {
   return String.fromCharCode(65 + index);
@@ -90,6 +109,7 @@ function PathCard({
   onOpenChat: () => void;
 }) {
   const letter = pathLetter(index);
+  const cleanTitle = getCleanTitle(path.title);
 
   return (
     <div
@@ -112,7 +132,7 @@ function PathCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-display font-semibold text-[var(--text-primary)]" style={{ fontSize: 'var(--text-xs)' }}>
-              {path.title}
+              {letter}: {cleanTitle}
             </span>
             {isRecommended && (
               <span className="rounded-full bg-[var(--blue-500)] px-3 py-0.5 font-semibold text-white" style={{ fontSize: 'var(--text-2xs)' }}>
@@ -125,20 +145,48 @@ function PathCard({
           </p>
         </div>
 
-        <span className="flex-shrink-0 mt-0.5 text-[var(--text-muted)] text-xl">
+        <span className="flex-shrink-0 mt-0.5 text-[var(--text-muted)]" style={{ fontSize: 'var(--text-xs)' }}>
           {isOpen ? '▲' : '▼'}
         </span>
       </button>
 
       {isOpen && (
-        <div className="px-5 pb-5 border-t border-[var(--border-soft)]">
+        <div className="px-5 pb-5 border-t border-[var(--border-soft)] bg-slate-50/30">
           <div className="pt-1">
-            <DetailRow label="Short term (6–12 months)" text={path.shortTerm} />
-            <DetailRow label={whatIf ? 'Long term · updated' : 'Long term (3–5 years)'} text={whatIf?.longTerm ?? path.longTerm} accent={whatIf ? 'var(--blue-600)' : undefined} />
-            <DetailRow label={whatIf ? 'Risks · updated' : 'Risks'} text={whatIf?.risks ?? path.risks} accent={whatIf ? '#c05c00' : undefined} />
-            <DetailRow label="Best for" text={path.bestFor} />
-            {path.opportunityCost && <DetailRow label="What you give up" text={path.opportunityCost} />}
-            {path.blindspot && <DetailRow label="⚠ Blindspot" text={path.blindspot} accent="#9a3e1e" />}
+            <DetailRow 
+              label="🌱 Upside: Short Term Benefits (6–12 months)" 
+              text={path.shortTerm} 
+              accent="var(--blue-600)"
+            />
+            <DetailRow 
+              label={whatIf ? '🚀 Upside: Long Term Targets · updated' : '🚀 Upside: Long Term Targets (3–5 years)'} 
+              text={whatIf?.longTerm ?? path.longTerm} 
+              accent="#6366F1"
+            />
+            <DetailRow 
+              label={whatIf ? '⚠️ Downside: Core Risks · updated' : '⚠️ Downside: Core Risks'} 
+              text={whatIf?.risks ?? path.risks} 
+              accent="#D97706"
+            />
+            {path.opportunityCost && (
+              <DetailRow 
+                label="⚖️ Sacrifices: What You Give Up" 
+                text={path.opportunityCost} 
+                accent="#EF4444"
+              />
+            )}
+            <DetailRow 
+              label="🎯 Ideal Match: Best For" 
+              text={path.bestFor} 
+              accent="var(--sage)"
+            />
+            {path.blindspot && (
+              <DetailRow 
+                label="🔍 Hidden Blindspot" 
+                text={path.blindspot} 
+                accent="#9A3E1E"
+              />
+            )}
           </div>
 
           <button
@@ -172,28 +220,30 @@ export default function WarmDecisionResults({
   onSendPlanByEmail,
 }: WarmDecisionResultsProps) {
   const [openIndex, setOpenIndex] = useState<number | null>(0);
-  const [timelinePath, setTimelinePath] = useState<number | null>(0);
-  const [timelineYear, setTimelineYear] = useState<string>('3 years');
+  const [timelinePath, setTimelinePath] = useState<number>(0);
 
   const recommendedTitle = (() => {
     for (const path of analysis.paths) {
-      const short = path.title.includes(':') ? path.title.split(':')[0].trim() : path.title;
-      if (analysis.recommendation.includes(short)) return path.title;
+      const short = getCleanTitle(path.title);
+      if (analysis.recommendation.toLowerCase().includes(short.toLowerCase())) return path.title;
     }
     return analysis.paths[0]?.title ?? '';
   })();
 
-  const handleTimelineRequest = () => {
-    if (timelinePath === null || !timelineYear) return;
-    const path = analysis.paths[timelinePath];
-    if (!path) return;
-    onExploreTimeline(timelinePath, timelineYear, path);
+  const selectedPath = analysis.paths[timelinePath];
+
+  const getTimelineMarkerStyles = (idx: number) => {
+    const sequence = [
+      'border-indigo-500 text-indigo-600',
+      'border-cyan-500 text-cyan-600',
+      'border-emerald-500 text-emerald-600',
+      'border-amber-500 text-amber-600',
+      'border-rose-500 text-rose-600',
+      'border-purple-500 text-purple-600',
+      'border-teal-500 text-teal-600',
+    ];
+    return sequence[idx % sequence.length];
   };
-
-  const timelineKey = timelinePath !== null && timelineYear ? `${timelinePath}-${timelineYear}` : null;
-  const timelineResult = timelineKey ? timelineData[timelineKey] : null;
-
-  const isTimelineActive = activeTimeline?.pathIndex === timelinePath && activeTimeline?.year === timelineYear;
 
   return (
     <section className="space-y-10 pb-12" style={{ fontSize: 'var(--text-xs)' }}>
@@ -212,19 +262,20 @@ export default function WarmDecisionResults({
         )}
       </div>
 
-      {/* ── 2. WHAT-IF TOGGLES (Moved Above Suggested Paths) ── */}
+      {/* ── 2. WHAT-IF TOGGLES ── */}
       <div className="rounded-2xl border border-[var(--border-soft)] bg-white p-6 shadow-sm">
-        <p className="text-label text-[var(--text-muted)] mb-3">What-if conditions</p>
+        <p className="text-label text-[var(--text-muted)] mb-1">What-if conditions</p>
         <div className="flex flex-wrap gap-2">
-          {whatIfToggles.map((toggle) => {
+          {(analysis.dynamicWhatIfs || whatIfToggles).map((toggle) => {
             const active = activeToggles.includes(toggle.id);
             return (
               <button
                 key={toggle.id}
                 onClick={() => onToggleWhatIf(toggle.id)}
+                title={toggle.description}
                 className={`rounded-full border px-5 py-2.5 font-semibold transition-all ${
                   active
-                    ? 'border-[var(--blue-400)] bg-[var(--blue-50)] text-[var(--blue-700)]'
+                    ? 'border-[var(--blue-400)] bg-[var(--blue-50)] text-[var(--blue-700)] shadow-sm'
                     : 'border-[var(--border-soft)] bg-[var(--surface-warm)] text-[var(--text-secondary)] hover:border-[var(--blue-200)]'
                 }`}
                 style={{ fontSize: 'var(--text-2xs)' }}
@@ -235,8 +286,8 @@ export default function WarmDecisionResults({
           })}
         </div>
         {whatIfLoading && (
-          <p className="mt-3 text-[var(--text-muted)]" style={{ fontSize: 'var(--text-2xs)' }}>
-            Recalculating risks and long-term outcomes…
+          <p className="mt-3 text-[var(--text-muted)] animate-pulse" style={{ fontSize: 'var(--text-2xs)' }}>
+            Recalculating risks and long-term outcomes under this stress condition…
           </p>
         )}
         {activeToggles.length > 0 && !whatIfLoading && (
@@ -269,84 +320,76 @@ export default function WarmDecisionResults({
 
       {/* ── 4. TIMELINE EXPLORER ── */}
       <div className="rounded-2xl border border-[var(--border-soft)] bg-white p-6 shadow-sm">
-        <p className="text-label text-[var(--text-muted)] mb-1">Timeline explorer</p>
-        <p className="text-[var(--text-muted)] mb-4" style={{ fontSize: 'var(--text-2xs)' }}>
-          Choose a path and a time horizon to see a vivid projection of what life looks like at that point.
-        </p>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          {/* Path Selector */}
-          <div>
-            <p className="font-semibold text-[var(--text-secondary)] mb-2" style={{ fontSize: 'var(--text-2xs)' }}>
-              Select path
-            </p>
-            <div className="flex flex-col gap-2">
-              {analysis.paths.map((path, index) => (
-                <button
-                  key={path.title}
-                  onClick={() => setTimelinePath(index)}
-                  className={`w-full text-left rounded-xl border px-4 py-3 font-semibold transition-all ${
-                    timelinePath === index
-                      ? 'border-[var(--lavender)] bg-[var(--lavender-light)] text-[var(--text-primary)]'
-                      : 'border-[var(--border-soft)] bg-[var(--surface-warm)] text-[var(--text-secondary)] hover:border-[var(--lavender-mid)]'
-                  }`}
-                  style={{ fontSize: 'var(--text-2xs)' }}
-                >
-                  Path {pathLetter(index)} {path.title.includes(':') && `· ${path.title.split(':')[1]?.trim()}`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Horizon Selector */}
-          <div>
-            <p className="font-semibold text-[var(--text-secondary)] mb-2" style={{ fontSize: 'var(--text-2xs)' }}>
-              Time horizon
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {TIMELINE_YEARS.map((year) => (
-                <button
-                  key={year}
-                  onClick={() => setTimelineYear(year)}
-                  className={`rounded-xl border p-3 font-semibold transition-all text-center ${
-                    timelineYear === year
-                      ? 'border-[var(--blue-400)] bg-[var(--blue-50)] text-[var(--blue-700)]'
-                      : 'border-[var(--border-soft)] bg-[var(--surface-warm)] text-[var(--text-secondary)] hover:border-[var(--blue-200)]'
-                  }`}
-                  style={{ fontSize: 'var(--text-2xs)' }}
-                >
-                  {year}
-                </button>
-              ))}
-            </div>
+        <h3 className="text-label text-[var(--text-muted)] mb-1">Timeline storybook</h3>
+        <div className="mb-6">
+          <p className="font-semibold text-[var(--text-secondary)] mb-2" style={{ fontSize: 'var(--text-2xs)' }}>
+            Select your sequence lane
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {analysis.paths.map((path, index) => (
+              <button
+                key={`time-btn-${path.title}`}
+                onClick={() => {
+                  setTimelinePath(index);
+                  if (path) {
+                    onExploreTimeline(index, 'Full Sequence', path);
+                  }
+                }}
+                className={`rounded-xl border px-4 py-2.5 font-semibold transition-all ${
+                  timelinePath === index
+                    ? 'border-[var(--lavender)] bg-[var(--lavender-light)] text-[var(--text-primary)]'
+                    : 'border-[var(--border-soft)] bg-[var(--surface-warm)] text-[var(--text-secondary)] hover:border-[var(--lavender-mid)]'
+                }`}
+                style={{ fontSize: 'var(--text-2xs)' }}
+              >
+                {getCleanTitle(path.title)}
+              </button>
+            ))}
           </div>
         </div>
 
-        <button
-          onClick={handleTimelineRequest}
-          disabled={timelinePath === null || !timelineYear || timelineLoading}
-          className="w-full md:w-auto rounded-xl bg-[var(--blue-500)] px-6 py-3 font-semibold text-white disabled:opacity-40 hover:bg-[var(--blue-600)] transition-colors"
-          style={{ fontSize: 'var(--text-2xs)' }}
-        >
-          {timelineLoading && isTimelineActive ? 'Projecting…' : 'Project this future →'}
-        </button>
+        {timelineLoading ? (
+          <p className="text-[var(--text-muted)] animate-pulse py-4" style={{ fontSize: 'var(--text-2xs)' }}>
+            Running lifetime sequence simulations...
+          </p>
+        ) : selectedPath ? (
+          <div className="relative mt-4 space-y-6 before:absolute before:bottom-3 before:top-3 before:left-3.5 before:w-0.5 before:bg-[var(--border-soft)]">
+            
+            {(selectedPath.timelineSteps || [
+              { label: '🌱 Stage 1: Initiation (Year 1)', text: selectedPath.shortTerm },
+              { label: '⚡ Stage 2: Navigation & Friction (Year 2)', text: 'Navigating initial friction points, iron out execution bottlenecks, and beginning to compound early wins.' },
+              { label: '🚀 Stage 3: Momentum Balance (Year 3)', text: selectedPath.threeYear || 'Establishing consistent workflows, stabilizing structural resources, and solidifying long-term strategic alignments.' },
+              { label: '🎯 Stage 4: High Growth Target (Year 5)', text: selectedPath.fiveYear || selectedPath.longTerm },
+              { label: '🏹 Stage 5: System Legacy Integration (Year 10)', text: selectedPath.tenYear || 'Compounding historical returns take root completely, defining stable lifestyles and opening subsequent generation horizons.' }
+            ]).map((step, sIdx) => {
+              const markerStyles = getTimelineMarkerStyles(sIdx);
+              return (
+                <div key={`step-${sIdx}`} className="relative pl-9">
+                  <div className={`absolute left-[7px] top-1 h-[14px] w-[14px] rounded-full border-2 bg-white ${markerStyles.split(' ')[0]}`} />
+                  <h4 className={`font-bold uppercase tracking-wider ${markerStyles.split(' ')[1]}`} style={{ fontSize: 'var(--text-2xs)' }}>
+                    {step.label}
+                  </h4>
+                  <p className="text-[var(--text-primary)] mt-1.5 leading-relaxed" style={{ fontSize: 'var(--text-xs)' }}>
+                    {step.text}
+                  </p>
+                </div>
+              );
+            })}
 
-        {timelineResult && (
-          <div className="mt-4 rounded-xl border border-[var(--border-soft)] bg-[var(--surface-warm)] p-4">
-            <p className="font-semibold text-[var(--text-muted)] mb-2" style={{ fontSize: 'var(--text-2xs)' }}>
-              {timelinePath !== null ? analysis.paths[timelinePath]?.title : ''} · {timelineYear}
-            </p>
-            <p className="text-[var(--text-primary)] leading-relaxed" style={{ fontSize: 'var(--text-xs)', lineHeight: 1.7 }}>
-              {timelineResult}
-            </p>
           </div>
+        ) : (
+          <p className="text-[var(--text-muted)] italic" style={{ fontSize: 'var(--text-2xs)' }}>
+            Select a pathway above to initialize the story track.
+          </p>
         )}
       </div>
 
-      {/* ── 5. FLOWCHART + EMAIL ── */}
-      <div className="rounded-2xl border border-[var(--border-soft)] bg-white p-6 shadow-sm">
+      {/* ── 5. FLOWCHART ── */}
+      <div className="rounded-2xl border border-[var(--border-soft)] bg-white p-6 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <p className="text-label text-[var(--text-muted)]">Decision flowchart</p>
+          <div>
+            <h3 className="text-label text-[var(--text-primary)] font-bold">Tactical action pipeline</h3>
+          </div>
           {profile?.email && (
             <button
               onClick={onSendPlanByEmail}
@@ -358,13 +401,71 @@ export default function WarmDecisionResults({
             </button>
           )}
         </div>
-        <div id="decision-flowchart-svg">
-          <DecisionFlowchart
-            scenario={scenario}
-            paths={analysis.paths.map((p) => ({ title: p.title, bestFor: p.bestFor }))}
-            recommendedTitle={recommendedTitle}
-          />
+
+        <div className="border-t border-[var(--border-soft)] pt-6">
+          <p className="font-semibold text-[var(--text-secondary)] mb-3" style={{ fontSize: 'var(--text-2xs)' }}>
+            Select tactical implementation lane:
+          </p>
+          <div className="flex flex-wrap gap-2 mb-6">
+            {analysis.paths.map((path, index) => (
+              <button
+                key={`flow-${path.title}`}
+                onClick={() => setOpenIndex(index)}
+                className={`rounded-xl border px-4 py-2.5 font-semibold transition-all ${
+                  openIndex === index
+                    ? 'border-[var(--blue-400)] bg-[var(--blue-50)] text-[var(--blue-700)]'
+                    : 'border-[var(--border-soft)] bg-[var(--surface-warm)] text-[var(--text-secondary)] hover:border-[var(--blue-200)]'
+                }`}
+                style={{ fontSize: 'var(--text-2xs)' }}
+              >
+                {getCleanTitle(path.title)} Map
+              </button>
+            ))}
+          </div>
+
+          {openIndex !== null && analysis.paths[openIndex] && (
+            <div className="w-full overflow-x-auto pb-4 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+              <div className="flex flex-row items-stretch space-x-8 min-w-max px-4 relative py-4">
+                
+                <div className="absolute top-[42px] left-8 right-8 h-0.5 bg-slate-200 z-0" />
+
+                {(analysis.paths[openIndex].flowchartSteps || [
+                  { phase: '01', title: 'Setup Baseline', desc: 'Secure operational limits, dependencies, and baseline fallback architectures.', timeframe: 'Now' },
+                  { phase: '02', title: 'Core Strategy Execution', desc: analysis.paths[openIndex].choice, timeframe: '2 weeks' },
+                  { phase: '03', title: 'Short-Term Deliverables', desc: analysis.paths[openIndex].shortTerm, timeframe: '1 month' },
+                  { phase: '04', title: 'Risk Safeguards & Constraints', desc: analysis.paths[openIndex].risks, timeframe: '2 months' },
+                  { phase: '05', title: 'Target Metric Capture', desc: `Optimize conditions explicitly for: ${analysis.paths[openIndex].bestFor}`, timeframe: '6 months' }
+                ]).map((node, nIdx) => (
+                  <div 
+                    key={`node-${nIdx}`} 
+                    className="w-72 flex-shrink-0 bg-white border border-slate-200 rounded-xl p-4 shadow-sm relative z-10 flex flex-col justify-between transition-all hover:border-[var(--blue-300)] hover:shadow-md"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[9px] font-bold bg-slate-100 text-slate-500 rounded px-2 py-0.5 uppercase tracking-wide">
+                          Step {node.phase || `0${nIdx + 1}`}
+                        </span>
+                        
+                        {/* Styled Green Timestamp Badge */}
+                        {node.timeframe && (
+                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 shadow-2xs">
+                            ⏰ {node.timeframe}
+                          </span>
+                        )}
+                      </div>
+                      <h5 className="font-bold text-slate-800 text-xs mb-1.5">{node.title}</h5>
+                      <p className="text-[var(--text-secondary)] leading-relaxed" style={{ fontSize: 'var(--text-2xs)' }}>
+                        {node.desc}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+
+              </div>
+            </div>
+          )}
         </div>
+
         {emailStatus === 'sent' && (
           <p className="mt-3 text-[var(--sage)]" style={{ fontSize: 'var(--text-2xs)' }}>
             Sent to {profile?.email}.
@@ -375,6 +476,9 @@ export default function WarmDecisionResults({
       <p className="text-center text-[var(--text-muted)] px-4" style={{ fontSize: 'var(--text-2xs)' }}>
         This simulator organises possibilities — it cannot know your full circumstances.
         Use it as a conversation starter, not a final authority.
+      </p>
+      <p className="text-center text-[var(--text-muted)] px-4" style={{ fontSize: 'var(--text-2xs)' }}>
+        AI can make mistakes. Please double-check responses.
       </p>
     </section>
   );

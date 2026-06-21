@@ -192,3 +192,8 @@ textarea:focus {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Hide scrollbar ONLY on the initial input home screen when the dock is active */
+main.has-scenario-dock {
+  overflow-y: hidden;
+}

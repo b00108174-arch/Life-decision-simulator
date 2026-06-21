@@ -1,7 +1,9 @@
+
+
 // app/api/profile/route.ts
 //
 // Two jobs:
-//   1. Generate 3-4 adaptive follow-up questions based on the scenario
+//   1. Generate 1-2 dynamic adaptive follow-up questions based on the scenario
 //      + profile (age can shift question framing — e.g. career
 //      questions for an adult vs. study-path questions for a student).
 //   2. Save the profile to Supabase if configured; otherwise the
@@ -46,18 +48,18 @@ export async function POST(req: NextRequest) {
               {
                 role: 'system',
                 content:
-                  'You generate short, specific follow-up questions to help understand someone\'s life-decision scenario better ' +
-                  'before producing recommendations. Questions must be respectful, supportive, non-judgmental, and never presumptuous ' +
-                  'about the person\'s circumstances. Tailor questions to the person\'s age where relevant. ' +
-                  'Return ONLY a JSON object: {"questions": ["...", "...", "..."]} with exactly 3 questions, each under 20 words, ' +
-                  'each addressing a DIFFERENT angle (e.g. constraints, motivations, risk tolerance, timeline) — no overlapping questions.',
+                  'You generate short, highly specific follow-up questions to help understand someone\'s life-decision scenario better ' +
+                  'before producing recommendations. Questions must be respectful, supportive, non-judgmental, and never presumptuous. ' +
+                  'Tailor the questions deeply to the person\'s scenario and age context. ' +
+                  'Return ONLY a JSON object: {"questions": ["...", "..."]} with EXACTLY 1 or 2 high-impact questions max. ' +
+                  'Keep each question under 15 words, each focusing cleanly on a major missing core detail (like timeline or constraints) — no filler.',
               },
               {
                 role: 'user',
                 content: `Scenario: "${scenario}"\nPerson's age: ${profile.age}`,
               },
             ],
-            max_tokens: 300,
+            max_tokens: 150, // Reduced from 300 to cut latency significantly
             temperature: 0.4,
           }),
         });
@@ -68,7 +70,8 @@ export async function POST(req: NextRequest) {
           const cleaned = raw.replace(/```json|```/g, '').trim();
           const parsed = JSON.parse(cleaned);
           if (Array.isArray(parsed.questions)) {
-            questions = parsed.questions.filter((q: unknown) => typeof q === 'string').slice(0, 4);
+            // Keep exactly 1 or 2 dynamic questions
+            questions = parsed.questions.filter((q: unknown) => typeof q === 'string').slice(0, 2);
           }
         }
       } catch (aiErr) {
@@ -77,12 +80,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (questions.length === 0) {
-      // Safe generic fallback if the AI call fails for any reason.
-      questions = [
-        'What matters most to you in making this decision?',
-        'What constraints (time, money, relationships) should we factor in?',
-        'How comfortable are you with risk and uncertainty here?',
-      ];
+      // Snappy single fallback if the API fails
+      questions = ['What matters most to you in making this decision?'];
     }
 
     // --- Save/update profile in Supabase if configured ---
