@@ -23,6 +23,7 @@ interface Path {
   blindspot?: string;
   threeYear?: string;
   fiveYear?: string;
+  tenYear?: string;
 }
 
 interface Analysis {
@@ -45,8 +46,6 @@ const WHAT_IF_TOGGLES = [
   { id: 'fast_industry_change', label: 'Industry shift', icon: 'I', description: 'The field is changing quickly' },
 ];
 
-// App flow stages. 'crisis' fully replaces the simulation UI and is
-// never shown alongside path content — see components/CrisisSupport.tsx.
 type Stage = 'input' | 'profile' | 'results' | 'crisis';
 
 export default function Home() {
@@ -67,10 +66,15 @@ export default function Home() {
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Profile state and email-send status for the flowchart delivery feature.
   const [profile, setProfile] = useState<CollectedProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'unavailable' | 'error'>('idle');
+
+  // Prevents SSR/client hydration mismatch on the Simulate button.
+  // The server always renders it as enabled; after mount the real
+  // scenario-derived disabled value takes over without a mismatch.
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => { setIsMounted(true); }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -88,21 +92,12 @@ export default function Home() {
     }
   }, [profile]);
 
-  /**
-   * Runs both layers of crisis detection (keyword, client-side, then AI
-   * confirmation, server-side) on a piece of free text. Returns true if
-   * the text was flagged, in which case the caller should stop whatever
-   * it was doing and let this function's side effect (switching to the
-   * 'crisis' stage) take over. This must run BEFORE any scenario is
-   * sent to /api/analyze, and before any follow-up answer is accepted.
-   */
   const runCrisisCheck = async (
     text: string,
     source: 'scenario' | 'profile_followup' | 'deep_dive_chat' = 'scenario',
     context?: { userIdentifier?: string; profileId?: string | null }
   ): Promise<boolean> => {
     const keywordResult = checkForCrisisKeywords(text);
-
     try {
       const res = await fetch('/api/crisis-check', {
         method: 'POST',
@@ -117,42 +112,22 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (data.flagged) {
-        setStage('crisis');
-        return true;
-      }
+      if (data.flagged) { setStage('crisis'); return true; }
       return false;
     } catch {
-      // If the check itself fails, fail closed only on a clear keyword
-      // hit — otherwise let the user continue rather than blocking the
-      // whole app on a network blip.
-      if (keywordResult.flagged) {
-        setStage('crisis');
-        return true;
-      }
+      if (keywordResult.flagged) { setStage('crisis'); return true; }
       return false;
     }
   };
 
-  /**
-   * Step 1 of the flow: user enters a scenario. Run crisis check first;
-   * if clear, move to profile + follow-up collection instead of
-   * analyzing immediately.
-   */
   const handleScenarioSubmit = async () => {
     if (!scenario.trim()) return;
     setError('');
-
     const flagged = await runCrisisCheck(scenario, 'scenario');
     if (flagged) return;
-
     setStage('profile');
   };
 
-  /**
-   * Step 2 callback: profile + follow-up answers collected. Now run
-   * the actual analysis.
-   */
   const handleProfileComplete = async (
     collectedProfile: CollectedProfile,
     answers: FollowUpAnswer[],
@@ -179,12 +154,11 @@ export default function Home() {
 
     try {
       const personalizationContext = buildPersonalizationContext();
-
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          scenario: scenario + `. For each path also provide: 1) opportunityCost: what is specifically sacrificed by choosing this path over others, 2) blindspot: one non-obvious hidden consequence most people miss, 3) threeYear: specific situation at 3 years, 4) fiveYear: specific situation at 5 years. Add these as extra fields inside each path object.`,
+          scenario: scenario,
           originalScenario: scenario,
           followUpAnswers: answers ?? [],
           personalizationContext,
@@ -194,15 +168,9 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (data.flagged) {
-        setStage('crisis');
-        return;
-      }
+      if (data.flagged) { setStage('crisis'); return; }
       if (!res.ok) throw new Error(data.error || 'Something went wrong');
 
-      // Apply tone safeguard to top-level text fields as a backstop,
-      // in addition to the system-prompt instruction already sent to
-      // the model (see lib/toneReview.ts).
       const safeData: Analysis = {
         ...data,
         summary: safeguardText(data.summary),
@@ -211,15 +179,7 @@ export default function Home() {
 
       setAnalysis(safeData);
       setStage('results');
-
-      // Persist to local history immediately (works even without a
-      // backend). The /api/analyze route also persists to Supabase
-      // server-side if configured and a profileId is present.
-      saveLocalDecision({
-        scenario,
-        followUpAnswers: answers ?? [],
-        analysis: safeData,
-      });
+      saveLocalDecision({ scenario, followUpAnswers: answers ?? [], analysis: safeData });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
       setStage('input');
@@ -234,10 +194,7 @@ export default function Home() {
       : [...activeToggles, toggleId];
     setActiveToggles(newToggles);
 
-    if (!analysis || newToggles.length === 0) {
-      setWhatIfResults({});
-      return;
-    }
+    if (!analysis || newToggles.length === 0) { setWhatIfResults({}); return; }
 
     setWhatIfLoading(true);
     const conditions = WHAT_IF_TOGGLES.filter(t => newToggles.includes(t.id)).map(t => t.label).join(', ');
@@ -267,21 +224,27 @@ export default function Home() {
         }
       });
       setWhatIfResults(results);
-    } catch {
-      console.error('What-if failed');
-    } finally {
-      setWhatIfLoading(false);
-    }
+    } catch { console.error('What-if failed'); }
+    finally { setWhatIfLoading(false); }
   };
 
   const exploreTimeline = async (pathIndex: number, year: string, path: Path) => {
     const key = `${pathIndex}-${year}`;
-    if (activeTimeline?.pathIndex === pathIndex && activeTimeline?.year === year) {
-      setActiveTimeline(null);
+    setActiveTimeline({ pathIndex, year });
+
+    // Use cached pre-generated fields if available to avoid an extra API call
+    const cached =
+      year === '1 year'   ? path.shortTerm  :
+      year === '3 years'  ? path.threeYear  :
+      year === '5 years'  ? path.fiveYear   :
+      year === '10 years' ? path.tenYear    :
+      undefined;
+
+    if (timelineData[key]) return;
+    if (cached) {
+      setTimelineData(prev => ({ ...prev, [key]: cached }));
       return;
     }
-    setActiveTimeline({ pathIndex, year });
-    if (timelineData[key]) return;
 
     setTimelineLoading(true);
     try {
@@ -289,7 +252,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          scenario: `For someone who chose "${path.title}" (${path.choice}) in this scenario: "${scenario}". Describe specifically what their life looks like at the ${year} mark. What compounded effects have occurred? What decisions are they now facing? Be concrete and vivid. Return as JSON with a single "text" field.`,
+          scenario: `For someone who chose "${path.title}" (${path.choice}) in this scenario: "${scenario}". Describe specifically and vividly what their life looks like at the ${year} mark. Cover: career/finances, relationships, wellbeing, regrets or pride. What compounded effects have occurred? Return as JSON with a single "text" field.`,
           originalScenario: scenario,
           profileId,
           userIdentifier: profile?.email ?? 'anonymous',
@@ -299,13 +262,11 @@ export default function Home() {
       const data = await res.json();
       setTimelineData(prev => ({
         ...prev,
-        [key]: data.summary || data.recommendation || data.text || `At ${year}: ${path.longTerm}`
+        [key]: data.text || data.summary || data.recommendation || `At ${year}: ${path.longTerm}`
       }));
     } catch {
       setTimelineData(prev => ({ ...prev, [key]: `At ${year}: ${path.longTerm}` }));
-    } finally {
-      setTimelineLoading(false);
-    }
+    } finally { setTimelineLoading(false); }
   };
 
   const openChat = (path: Path, pathIndex: number) => {
@@ -319,14 +280,8 @@ export default function Home() {
   const sendChat = async () => {
     if (!chatInput.trim() || !chatModal.path) return;
     const userMsg = chatInput.trim();
-
-    // Crisis check on chat messages too — the deep-dive chat is still
-    // a free-text input surface and needs the same protection.
     const flagged = await runCrisisCheck(userMsg, 'deep_dive_chat');
-    if (flagged) {
-      setChatModal({ open: false, path: null, pathIndex: 0 });
-      return;
-    }
+    if (flagged) { setChatModal({ open: false, path: null, pathIndex: 0 }); return; }
 
     setChatInput('');
     const newMessages: ChatMessage[] = [...chatMessages, { role: 'user', content: userMsg }];
@@ -346,26 +301,17 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (data.flagged) {
-        setChatModal({ open: false, path: null, pathIndex: 0 });
-        setStage('crisis');
-        return;
-      }
+      if (data.flagged) { setChatModal({ open: false, path: null, pathIndex: 0 }); setStage('crisis'); return; }
       const answer = safeguardText(data.answer || data.summary || data.recommendation || 'Let me think about that differently...');
       setChatMessages([...newMessages, { role: 'assistant', content: answer }]);
     } catch {
       setChatMessages([...newMessages, { role: 'assistant', content: 'Sorry, something went wrong. Try again.' }]);
-    } finally {
-      setChatLoading(false);
-    }
+    } finally { setChatLoading(false); }
   };
 
-  /** Sends the flowchart + decision plan to the user's email via Resend. */
   const sendPlanByEmail = async () => {
     if (!profile?.email || !analysis) return;
     setEmailStatus('sending');
-
-    // Serialize the flowchart SVG so it can be embedded in the email body.
     const svgElement = document.getElementById('decision-flowchart-svg');
     const flowchartSvg = svgElement ? svgElement.outerHTML : '';
 
@@ -384,16 +330,10 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (data.error === 'not_configured') {
-        setEmailStatus('unavailable');
-      } else if (!res.ok || data.error) {
-        setEmailStatus('error');
-      } else {
-        setEmailStatus('sent');
-      }
-    } catch {
-      setEmailStatus('error');
-    }
+      if (data.error === 'not_configured') setEmailStatus('unavailable');
+      else if (!res.ok || data.error) setEmailStatus('error');
+      else setEmailStatus('sent');
+    } catch { setEmailStatus('error'); }
   };
 
   const resetToStart = () => {
@@ -403,148 +343,246 @@ export default function Home() {
     setProfile(null);
   };
 
-  return (
-    <main className="min-h-screen bg-[#FAF9F6] px-4 py-6 text-[#333333] sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-6xl">
+  /* ─── Derived ─── */
+  const showDock = stage === 'input';
 
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-[#EEEEEE] pb-4">
+  return (
+    <main className={`min-h-screen bg-[#F7F8FC] text-[#1E2235] ${showDock ? 'has-scenario-dock' : ''}`}>
+
+      {/* ── HEADER ─────────────────────────────────────────────────── */}
+      <header className="header-bar sticky top-0 z-30 px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-[#333333]">
-              {stage !== 'input' && profile?.name ? `${profile.name}'s Life Path Simulator` : 'Life Decision Simulator'}
+            <h1
+              className="font-display font-semibold text-[#1E2235] tracking-tight"
+              style={{ fontSize: 'var(--text-lg)' }}   /* 26px — golden ratio heading */
+            >
+              {stage !== 'input' && profile?.name
+                ? `${profile.name}'s Life Path Simulator`
+                : 'Life Decision Simulator'}
             </h1>
-            <p className="mt-1 text-sm leading-6 text-[#666666]">
+            <p
+              className="mt-0.5 text-[#7A809A]"
+              style={{ fontSize: 'var(--text-xs)' }}    /* 11px — golden ratio label */
+            >
               Simulating unique future cascading scenarios using predictive NLP for mid-career choices.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Link href="/admin/alerts" className="whitespace-nowrap rounded-full border border-[#D8CCFF] px-4 py-2 text-sm font-semibold text-[#333333] hover:bg-white">
+          <nav className="flex items-center gap-2">
+            <Link
+              href="/admin/alerts"
+              className="whitespace-nowrap rounded-full border border-[#A8CFEE] bg-[#EEF5FC] px-4 py-2 font-semibold text-[#245F9A] hover:bg-[#D6E8F7]"
+              style={{ fontSize: 'var(--text-xs)' }}
+            >
               Safety inbox
             </Link>
-            <Link href="/history" className="whitespace-nowrap rounded-full border border-[#EEEEEE] px-4 py-2 text-sm font-semibold text-[#666666] hover:bg-white">
+            <Link
+              href="/history"
+              className="whitespace-nowrap rounded-full border border-[#E4E8F2] bg-white px-4 py-2 font-semibold text-[#4A5068] hover:bg-[#F7F8FC]"
+              style={{ fontSize: 'var(--text-xs)' }}
+            >
               History
             </Link>
-          </div>
+          </nav>
         </div>
+      </header>
 
-        {/* CRISIS STAGE — fully replaces all simulation/decision UI.
-            No paths, toggles, timelines, or chat are rendered here. */}
+      {/* ── PAGE CONTENT ───────────────────────────────────────────── */}
+      <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+
+        {/* CRISIS STAGE */}
         {stage === 'crisis' && <CrisisSupport onBack={resetToStart} />}
 
-        {/* INPUT STAGE */}
+        {/* INPUT STAGE — hero copy, sits above the bottom dock */}
         {stage === 'input' && (
-          <div className="rounded-2xl border border-[#EEEEEE] bg-white p-7 shadow-sm">
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-[#666666]">
-              Describe your decision
-            </label>
-            <textarea
-              value={scenario}
-              onChange={(e) => setScenario(e.target.value)}
-              rows={4}
-              placeholder="e.g. Should I take a job offer abroad or stay close to family?"
-              className="w-full resize-none rounded-2xl border border-[#EEEEEE] bg-[#FAF9F6] px-4 py-3 text-sm leading-7 text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#B094FF]"
-            />
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4 mt-4 text-sm text-red-700">{error}</div>
-            )}
-            <button
-              onClick={handleScenarioSubmit}
-              disabled={!scenario.trim()}
-              className="mt-4 w-full rounded-full bg-[#B094FF] py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#9D7DFF] disabled:opacity-50"
+          <div className="fade-up flex flex-col items-center justify-center py-16 text-center">
+            <span
+              className="mb-4 inline-block rounded-full bg-[#EEF5FC] px-4 py-1.5 font-semibold text-[#4A90D9]"
+              style={{ fontSize: 'var(--text-xs)' }}
             >
-              Continue
-            </button>
+              AI-powered decision planning
+            </span>
+            <h2
+              className="font-display font-bold text-[#1E2235] leading-tight max-w-2xl"
+              style={{ fontSize: 'var(--text-xl)' }}   /* 42px display */
+            >
+              What decision is{' '}
+              <span className="text-[#4A90D9]">weighing on you?</span>
+            </h2>
+            <p
+              className="mt-4 max-w-lg text-[#7A809A] leading-relaxed"
+              style={{ fontSize: 'var(--text-sm)' }}
+            >
+              Describe your scenario below and we'll simulate realistic future paths — complete with tradeoffs, timelines, and a personal flowchart.
+            </p>
+
+            {error && (
+              <div
+                className="mt-6 w-full max-w-xl rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700"
+                style={{ fontSize: 'var(--text-xs)' }}
+              >
+                {error}
+              </div>
+            )}
           </div>
         )}
 
         {/* PROFILE + FOLLOW-UP STAGE */}
         {stage === 'profile' && (
-          <ProfileAndFollowUp
-            scenario={scenario}
-            onComplete={handleProfileComplete}
-            onCrisisCheck={runCrisisCheck}
-          />
+          <div className="fade-up">
+            <ProfileAndFollowUp
+              scenario={scenario}
+              onComplete={handleProfileComplete}
+              onCrisisCheck={runCrisisCheck}
+            />
+          </div>
         )}
 
         {/* Loading skeleton */}
         {loading && (
           <div className="space-y-4 animate-pulse mt-6">
-            <div className="h-24 bg-gray-100 rounded-2xl" />
-            <div className="h-24 bg-gray-100 rounded-2xl" />
-            <div className="h-24 bg-gray-100 rounded-2xl" />
+            <div className="h-28 rounded-2xl bg-[#EEF5FC]" />
+            <div className="h-28 rounded-2xl bg-[#EEF5FC]" />
+            <div className="h-28 rounded-2xl bg-[#EEF5FC]" />
           </div>
         )}
 
         {/* RESULTS STAGE */}
         {stage === 'results' && analysis && !loading && (
-          <WarmDecisionResults
-            scenario={scenario}
-            analysis={analysis}
-            profile={profile}
-            whatIfToggles={WHAT_IF_TOGGLES}
-            activeToggles={activeToggles}
-            whatIfLoading={whatIfLoading}
-            whatIfResults={whatIfResults}
-            activeTimeline={activeTimeline}
-            timelineData={timelineData}
-            timelineLoading={timelineLoading}
-            emailStatus={emailStatus}
-            onToggleWhatIf={toggleWhatIf}
-            onExploreTimeline={exploreTimeline}
-            onOpenChat={openChat}
-            onSendPlanByEmail={sendPlanByEmail}
-          />
+          <div className="fade-up">
+            <WarmDecisionResults
+              scenario={scenario}
+              analysis={analysis}
+              profile={profile}
+              whatIfToggles={WHAT_IF_TOGGLES}
+              activeToggles={activeToggles}
+              whatIfLoading={whatIfLoading}
+              whatIfResults={whatIfResults}
+              activeTimeline={activeTimeline}
+              timelineData={timelineData}
+              timelineLoading={timelineLoading}
+              emailStatus={emailStatus}
+              onToggleWhatIf={toggleWhatIf}
+              onExploreTimeline={exploreTimeline}
+              onOpenChat={openChat}
+              onSendPlanByEmail={sendPlanByEmail}
+            />
+          </div>
         )}
       </div>
 
-      {/* CHAT MODAL */}
+      {/* ── BOTTOM-DOCKED SCENARIO INPUT ───────────────────────────── */}
+      {showDock && (
+        <div className="scenario-dock">
+          <div className="mx-auto w-full max-w-2xl">
+            <div className="relative flex items-end gap-3 rounded-2xl border border-[#A8CFEE] bg-white p-1 shadow-lg shadow-[#4A90D9]/10">
+              <textarea
+                value={scenario}
+                onChange={(e) => setScenario(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleScenarioSubmit();
+                  }
+                }}
+                rows={2}
+                placeholder="e.g. Should I take a job offer abroad or stay close to family?"
+                className="flex-1 resize-none rounded-xl bg-transparent px-4 py-3 text-[#1E2235] placeholder-[#7A809A] focus:outline-none"
+                style={{ fontSize: 'var(--text-sm)', lineHeight: '1.6' }}
+              />
+              <button
+                onClick={handleScenarioSubmit}
+                disabled={isMounted && !scenario.trim()}
+                className="mb-1 mr-1 flex-shrink-0 rounded-xl bg-[#4A90D9] px-5 py-3 font-semibold text-white shadow-sm hover:bg-[#357ABD] disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ fontSize: 'var(--text-xs)' }}
+              >
+                Simulate →
+              </button>
+            </div>
+            <p
+              className="mt-2 text-center text-[#7A809A]"
+              style={{ fontSize: 'var(--text-2xs)' }}
+            >
+              Press Enter or click Simulate · Shift+Enter for a new line
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── CHAT MODAL ─────────────────────────────────────────────── */}
       {chatModal.open && chatModal.path && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end sm:items-center justify-center p-4">
-          <div className="flex h-[70vh] w-full max-w-lg flex-col rounded-2xl bg-white">
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40 backdrop-blur-sm sm:items-center sm:justify-center p-4">
+          <div className="flex h-[72vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl">
 
             {/* Modal header */}
-            <div className="flex items-center justify-between rounded-t-2xl border-b border-[#EEEEEE] bg-[#E6E1F9] p-4">
+            <div className="flex items-center justify-between rounded-t-2xl border-b border-[#E4E8F2] bg-[#EEF5FC] p-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-[#666666]">Deep Dive</p>
-                <p className="text-sm font-semibold text-[#333333]">{chatModal.path.title}</p>
+                <p
+                  className="font-semibold uppercase tracking-widest text-[#4A90D9]"
+                  style={{ fontSize: 'var(--text-2xs)' }}
+                >
+                  Deep Dive
+                </p>
+                <p
+                  className="font-display font-semibold text-[#1E2235] mt-0.5"
+                  style={{ fontSize: 'var(--text-xs)' }}
+                >
+                  {chatModal.path.title}
+                </p>
               </div>
-              <button onClick={() => setChatModal({ open: false, path: null, pathIndex: 0 })} className="text-xl text-[#666666] hover:text-[#333333]">x</button>
+              <button
+                onClick={() => setChatModal({ open: false, path: null, pathIndex: 0 })}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-[#7A809A] hover:text-[#1E2235] hover:bg-[#F7F8FC]"
+              >
+                ✕
+              </button>
             </div>
 
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {chatMessages.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-xs text-sm rounded-2xl px-4 py-3 ${
-                    msg.role === 'user'
-                      ? 'bg-[#B094FF] text-white rounded-br-sm'
-                      : 'bg-[#FAF9F6] text-[#333333] rounded-bl-sm'
-                  }`}>
+                  <div
+                    className={`max-w-xs rounded-2xl px-4 py-3 ${
+                      msg.role === 'user'
+                        ? 'bg-[#4A90D9] text-white rounded-br-sm'
+                        : 'bg-[#F7F8FC] text-[#1E2235] rounded-bl-sm border border-[#E4E8F2]'
+                    }`}
+                    style={{ fontSize: 'var(--text-xs)' }}
+                  >
                     {msg.content}
                   </div>
                 </div>
               ))}
               {chatLoading && (
                 <div className="flex justify-start">
-                  <div className="animate-pulse rounded-2xl rounded-bl-sm bg-[#FAF9F6] px-4 py-3 text-sm text-[#666666]">Thinking...</div>
+                  <div
+                    className="animate-pulse rounded-2xl rounded-bl-sm border border-[#E4E8F2] bg-[#F7F8FC] px-4 py-3 text-[#7A809A]"
+                    style={{ fontSize: 'var(--text-xs)' }}
+                  >
+                    Thinking...
+                  </div>
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
             {/* Input */}
-            <div className="flex gap-2 border-t border-[#EEEEEE] p-4">
+            <div className="flex gap-2 border-t border-[#E4E8F2] p-3">
               <input
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && sendChat()}
                 placeholder="What if I hate it after 3 months?"
-                className="flex-1 rounded-xl border border-[#EEEEEE] bg-[#FAF9F6] px-4 py-2 text-sm text-[#333333] focus:outline-none focus:ring-2 focus:ring-[#B094FF]"
+                className="flex-1 rounded-xl border border-[#D6E8F7] bg-[#F7F8FC] px-4 py-2.5 text-[#1E2235] placeholder-[#7A809A]"
+                style={{ fontSize: 'var(--text-xs)' }}
               />
               <button
                 onClick={sendChat}
                 disabled={chatLoading || !chatInput.trim()}
-                className="rounded-xl bg-[#B094FF] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                className="rounded-xl bg-[#4A90D9] px-4 py-2.5 font-semibold text-white disabled:opacity-40 hover:bg-[#357ABD]"
+                style={{ fontSize: 'var(--text-xs)' }}
               >
                 Send
               </button>

@@ -94,13 +94,8 @@ Respond ONLY with a valid JSON object in exactly this structure (no markdown, no
 }`;
 
     // Try reliably free models in order
-    const models = [
-      'openrouter/auto',                              // auto-picks best available free model
-      'deepseek/deepseek-r1:free',                   // top reasoning model, free
-      'deepseek/deepseek-v3:free',                   // strong general model, free
-      'meta-llama/llama-3.3-70b-instruct:free',      // reliable llama free
-      'google/gemma-3-12b-it:free',                  // google gemma free
-      'qwen/qwen-2.5-7b-instruct:free',              // lightweight qwen free
+    const models = [        
+      'poolside/laguna-m.1:free'
     ];
 
     let lastError = '';
