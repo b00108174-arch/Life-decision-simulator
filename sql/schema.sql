@@ -70,16 +70,6 @@ create table if not exists public.crisis_events (
 alter table public.crisis_events
   add column if not exists source text not null default 'scenario';
 
--- NEW: alert_type column — distinguishes self-harm events from harm-to-others events.
--- Run this migration on any existing Supabase project to add the column.
--- Default is 'self_harm' so older rows are backward-compatible.
-alter table public.crisis_events
-  add column if not exists alert_type text not null default 'self_harm';
--- Allowed values: 'self_harm' | 'harm_to_others'
--- 'harm_to_others' rows display as 🚨 RED ALERT in the admin dashboard.
-
-create index if not exists idx_crisis_events_alert_type on public.crisis_events(alert_type);
-
 create index if not exists idx_crisis_events_created_at on public.crisis_events(created_at desc);
 create index if not exists idx_crisis_events_reviewed on public.crisis_events(reviewed);
 create index if not exists idx_crisis_events_source on public.crisis_events(source);

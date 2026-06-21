@@ -9,7 +9,6 @@ interface AlertRecord {
   prompt_excerpt: string;
   detection_method: string;
   source?: string | null;
-  alert_type?: string | null;  // NEW: 'self_harm' | 'harm_to_others'
   reviewed: boolean;
   created_at: string;
 }
@@ -114,28 +113,9 @@ export default function AdminAlertsPage() {
           ) : (
             <div className="divide-y divide-slate-100">
               {alerts.map((alert) => (
-                <article
-                  key={alert.id}
-                  className={`grid gap-4 p-4 md:grid-cols-[180px_1fr_140px] ${
-                    alert.alert_type === 'harm_to_others'
-                      ? 'bg-red-50 border-l-4 border-red-600'
-                      : alert.reviewed
-                      ? 'bg-slate-50'
-                      : 'bg-white'
-                  }`}
-                >
+                <article key={alert.id} className={`grid gap-4 p-4 md:grid-cols-[180px_1fr_140px] ${alert.reviewed ? 'bg-slate-50' : 'bg-white'}`}>
                   <div className="text-xs text-slate-500">
                     <p className="font-semibold text-slate-800">{new Date(alert.created_at).toLocaleString()}</p>
-                    {/* NEW: alert type badge */}
-                    <span
-                      className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${
-                        alert.alert_type === 'harm_to_others'
-                          ? 'bg-red-600 text-white'
-                          : 'bg-orange-100 text-orange-800'
-                      }`}
-                    >
-                      {alert.alert_type === 'harm_to_others' ? '🚨 RED ALERT' : '⚠️ Self-harm'}
-                    </span>
                     <p className="mt-2">{alert.user_identifier || 'anonymous'}</p>
                     <p>{alert.source || 'unknown source'}</p>
                     <p>{alert.detection_method}</p>
@@ -146,8 +126,6 @@ export default function AdminAlertsPage() {
                     className={`h-10 rounded-md px-3 text-sm font-semibold ${
                       alert.reviewed
                         ? 'border border-slate-300 text-slate-700 hover:bg-white'
-                        : alert.alert_type === 'harm_to_others'
-                        ? 'bg-red-600 text-white hover:bg-red-700'
                         : 'bg-rose-700 text-white hover:bg-rose-800'
                     }`}
                   >

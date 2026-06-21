@@ -9,7 +9,6 @@ import {
   buildPersonalizationContext,
 } from '@/lib/localHistory';
 import CrisisSupport from '@/components/CrisisSupport';
-import RedAlert from '@/components/RedAlert';
 import ProfileAndFollowUp, { CollectedProfile, FollowUpAnswer } from '@/components/ProfileAndFollowUp';
 import WarmDecisionResults from '@/components/WarmDecisionResults';
 
@@ -47,7 +46,7 @@ const WHAT_IF_TOGGLES = [
   { id: 'fast_industry_change', label: 'Industry shift', icon: 'I', description: 'The field is changing quickly' },
 ];
 
-type Stage = 'input' | 'profile' | 'results' | 'crisis' | 'red_alert';
+type Stage = 'input' | 'profile' | 'results' | 'crisis';
 
 export default function Home() {
   const [stage, setStage] = useState<Stage>('input');
@@ -70,9 +69,6 @@ export default function Home() {
   const [profile, setProfile] = useState<CollectedProfile | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [emailStatus, setEmailStatus] = useState<'idle' | 'sending' | 'sent' | 'unavailable' | 'error'>('idle');
-  // NEW: tracks whether the flagged content was self_harm or harm_to_others
-  // so the correct alert screen (CrisisSupport vs RedAlert) is displayed.
-  const [detectedAlertType, setDetectedAlertType] = useState<'self_harm' | 'harm_to_others' | null>(null);
 
   // Prevents SSR/client hydration mismatch on the Simulate button.
   // The server always renders it as enabled; after mount the real
@@ -116,21 +112,10 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (data.flagged) {
-        // NEW: route to red_alert for harm-to-others, crisis for self-harm
-        const type = data.alertType ?? keywordResult.alertType ?? 'self_harm';
-        setDetectedAlertType(type);
-        setStage(type === 'harm_to_others' ? 'red_alert' : 'crisis');
-        return true;
-      }
+      if (data.flagged) { setStage('crisis'); return true; }
       return false;
     } catch {
-      if (keywordResult.flagged) {
-        const type = keywordResult.alertType ?? 'self_harm';
-        setDetectedAlertType(type);
-        setStage(type === 'harm_to_others' ? 'red_alert' : 'crisis');
-        return true;
-      }
+      if (keywordResult.flagged) { setStage('crisis'); return true; }
       return false;
     }
   };
@@ -183,12 +168,7 @@ export default function Home() {
         }),
       });
       const data = await res.json();
-      if (data.flagged) {
-        // NEW: distinguish harm_to_others (red_alert) from self_harm (crisis)
-        setDetectedAlertType(data.alertType ?? 'self_harm');
-        setStage(data.alertType === 'harm_to_others' ? 'red_alert' : 'crisis');
-        return;
-      }
+      if (data.flagged) { setStage('crisis'); return; }
       if (!res.ok) throw new Error(data.error || 'Something went wrong');
 
       const safeData: Analysis = {
@@ -361,7 +341,6 @@ export default function Home() {
     setScenario('');
     setAnalysis(null);
     setProfile(null);
-    setDetectedAlertType(null); // NEW: clear alert state on back
   };
 
   /* ─── Derived ─── */
@@ -411,11 +390,8 @@ export default function Home() {
       {/* ── PAGE CONTENT ───────────────────────────────────────────── */}
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
 
-        {/* CRISIS STAGE — self-harm support screen */}
+        {/* CRISIS STAGE */}
         {stage === 'crisis' && <CrisisSupport onBack={resetToStart} />}
-
-        {/* RED ALERT STAGE — harm-to-others, highest severity */}
-        {stage === 'red_alert' && <RedAlert onBack={resetToStart} />}
 
         {/* INPUT STAGE — hero copy, sits above the bottom dock */}
         {stage === 'input' && (

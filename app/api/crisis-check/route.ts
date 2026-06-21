@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       source: source ?? 'scenario',
     });
 
-    return NextResponse.json({ flagged: result.flagged, alertType: result.alertType ?? null });
+    return NextResponse.json({ flagged: result.flagged });
   } catch (err) {
     console.error('Crisis check route error:', err);
     // Fail closed on errors: if we can't determine safety, treat as
